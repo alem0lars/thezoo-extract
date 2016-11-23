@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+
+import os
+import os.path
+import sys
+import re
+import glob
+from zipfile import ZipFile
+from shutil import copyfile
+
+# Load library `python-magic`.
+import magic
+if not hasattr(magic, 'from_file'):
+    print('Library `python-magic` is missing')
+    sys.exit(-2)
+
+if len(sys.argv) < 2:
+    print('Invalid theZoo path')
+    sys.exit(-1)
+
+if len(sys.argv) < 3:
+    print('Invalid dest path')
+    sys.exit(-1)
+
+passregexp = re.compile(r'\.pass$')
+zipregexp = re.compile(r'\.zip$')
+
+# Directory containing binaries from `theZoo`
+binariesdir = os.path.abspath(os.path.join(sys.argv[1], 'malwares/Binaries'))
+
+# Current directory
+curdir = os.getcwd()
+
+# Temporary directory
+tmpdir = os.path.abspath('thezoo-extracted')
+if not os.path.isdir(tmpdir):
+    os.makedirs(tmpdir)
+
+# Destination directory
+destdir = os.path.abspath(sys.argv[2])
+if not os.path.isdir(destdir):
+    os.makedirs(destdir)
+
+ALLOWED_FILES_MIMETYPES = [
+    'application/x-dosexec'
+]
+
+def filter_by_ext(filepaths, ext):
+    return [os.path.abspath(filepath)
+            for filepath in filepaths
+            if os.path.splitext(filepath)[1] == '.{}'.format(ext)]
+
+def filter_by_mimetypes(filepaths, mimetypes):
+    mimetypes = [mimetype.encode('utf8') for mimetype in mimetypes]
+    return [os.path.abspath(filepath)
+            for filepath in filepaths
+            if magic.from_file(filepath, mime=True) in mimetypes]
+
+def allowed_files(basedir):
+    return filter_by_mimetypes([os.path.join(basedir, filename)
+                                for filename in os.listdir(basedir)],
+                                ALLOWED_FILES_MIMETYPES)
+
+def extract(zipfile, password, destdir):
+    if not os.path.isdir(destdir):
+        os.makedirs(destdir)
+
+    try:
+        zf = ZipFile(zipfile)
+        print('extracting zip file {} using password {}'.format(zipfile, password))
+        os.chdir(destdir)
+        zf.extractall(pwd=password.encode('utf8'))
+        os.chdir(curdir)
+    except:
+        print('failed to extract zip file {}'.format(zipfile))
+        pass
+
+for dirpath in glob.glob(os.path.join(binariesdir, '*')):
+    print('doing {}'.format(dirpath))
+    filepaths = glob.glob(os.path.join(dirpath, '*'))
+    malwarename = os.path.basename(dirpath)
+    passfile = filter_by_ext(filepaths, 'pass')[0]
+    zipfile  = filter_by_ext(filepaths, 'zip')[0]
+    with open(passfile, 'r') as f:
+        password = f.read().strip()
+        workdir = os.path.join(tmpdir, malwarename)
+        extract(zipfile, password, workdir)
+        samples = allowed_files(workdir)
+        print('keeping files: {}'.format(samples))
+        for sample in samples:
+            samplename = os.path.basename(sample)
+            sampledestdir = os.path.join(destdir, malwarename)
+            if not os.path.isdir(sampledestdir):
+                os.makedirs(sampledestdir)
+            copyfile(sample, os.path.join(sampledestdir, samplename))
